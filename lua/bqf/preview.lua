@@ -336,7 +336,12 @@ end
 
 function M.toggle_item()
     if floatwin.validate_window() then
-        M.close()
+        local qf_winid = api.nvim_get_current_win()
+        if api.nvim_win_get_cursor(qf_winid)[1] == last_idx then
+            M.close()
+        else
+            M.open()
+        end
     else
         M.open()
     end
@@ -350,10 +355,10 @@ function M.move_cursor()
     end
     if auto_preview then
         M.open()
-    else
-        if api.nvim_win_get_cursor(qf_winid)[1] ~= last_idx then
-            M.close()
-        end
+    -- else
+    --     if api.nvim_win_get_cursor(qf_winid)[1] ~= last_idx then
+    --         M.close()
+    --     end
     end
 end
 
