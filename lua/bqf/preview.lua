@@ -305,6 +305,9 @@ function M.init_window(qf_winid)
 end
 
 function M.scroll(direction)
+    if not floatwin.validate_window() then
+        return
+    end
     local preview_winid = floatwin.winid()
     if preview_winid < 0 or not direction then
         return
