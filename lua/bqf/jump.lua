@@ -55,9 +55,6 @@ function M.open(close, qf_winid, idx0)
 
             local last_bufnr = api.nvim_win_get_buf(file_winid)
             api.nvim_set_current_win(file_winid)
-            if close then
-                api.nvim_win_close(qf_winid, true)
-            end
 
             set_opts_around(file_winid, function()
                 cmd(([[sil exe '%d%s']]):format(idx, suffix))
@@ -74,6 +71,10 @@ function M.open(close, qf_winid, idx0)
                 if lnum < topline or lnum > botline then
                     utils.zz()
                 end
+            end
+
+            if close then
+                api.nvim_win_close(qf_winid, true)
             end
         end
     end
