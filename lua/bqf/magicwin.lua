@@ -106,9 +106,10 @@ local function evaluate_fraction(winid, lnum, awrow, aheight, bheight, lbwrow, l
     end
 
     local lines_size = {}
+    local wrap = vim.wo[winid].wrap
     -- use 9 as additional compensation
     for i = math.max(1, lnum - e_sline - 9), lnum - 1 do
-        lines_size[i] = math.ceil(math.max(fn.virtcol({i, '$'}) - 1, 1) / per_l_wid)
+        lines_size[i] = wrap and math.ceil(math.max(fn.virtcol({i, '$'}) - 1, 1) / per_l_wid) or 1
     end
 
     if lbwrow and awrow == evaluate_sline(lfraction, aheight, lnum, lines_size) then
@@ -147,7 +148,8 @@ local function tune_line(winid, topline, lsizes)
 
     log.debug('lsizes:', lsizes)
 
-    local i_start, i_end, i_inc, should_continue, len
+    local i_start, i_end, i_inc, should_continue
+    local len
     local foldenable = vim.wo[winid].foldenable
     local folded_other_lnum
     local neg_one_func = function()
@@ -159,14 +161,14 @@ local function tune_line(winid, topline, lsizes)
         should_continue = function(iter)
             return iter >= i_end
         end
-        len = i_start - i_end
+        len = lsizes
         folded_other_lnum = foldenable and fn.foldclosed or neg_one_func
     else
         i_start, i_end, i_inc = topline, topline - lsizes - 1, 1
         should_continue = function(iter)
             return iter <= i_end
         end
-        len = i_end - i_start
+        len = -lsizes
         folded_other_lnum = foldenable and fn.foldclosedend or neg_one_func
     end
     log.debug(i_start, i_end, i_inc, len)
@@ -194,10 +196,7 @@ local function tune_line(winid, topline, lsizes)
             log.debug('loff:', loff)
             log.debug('=====================================================')
             i = i + i_inc
-            if lsize_sum > len then
-                if lsize_sum > len + 1 then
-                    loff = loff - 1
-                end
+            if lsize_sum >= len then
                 break
             end
         end
@@ -268,6 +267,7 @@ local function do_enter_revert(qf_winid, winid, qf_pos)
                 return
             end
             bwrow = cal_wrow(fraction, bheight)
+            log.debug('bwrow:', bwrow)
             delta_lsize = bwrow - awrow
         end
 
