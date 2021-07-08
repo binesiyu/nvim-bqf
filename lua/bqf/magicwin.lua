@@ -113,7 +113,7 @@ local function evaluate_fraction(winid, lnum, awrow, aheight, bheight, lbwrow, l
     end
 
     if lbwrow and awrow == evaluate_sline(lfraction, aheight, lnum, lines_size) then
-        return lbwrow, lfraction
+        return lfraction
     end
 
     local t_frac = {}
@@ -414,11 +414,11 @@ function M.revert_close_adjacent_wins(qf_winid, file_winid, qf_pos)
 end
 
 local function setup()
-    api.nvim_exec([[
+    cmd([[
         aug BqfMagicWin
             au!
         aug END
-    ]], false)
+    ]])
 end
 
 setup()

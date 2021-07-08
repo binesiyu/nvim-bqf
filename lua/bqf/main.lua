@@ -11,11 +11,11 @@ local keymap = require('bqf.keymap')
 local sign = require('bqf.sign')
 
 local function setup()
-    api.nvim_exec([[
+    cmd([[
         aug Bqf
             au!
         aug END
-    ]], false)
+    ]])
 end
 
 function M.toggle()
@@ -67,13 +67,13 @@ function M.enable()
     preview.buf_event()
     keymap.buf_map()
 
-    api.nvim_exec([[
+    cmd([[
         aug Bqf
             au! * <buffer>
             au WinEnter <buffer> lua require('bqf.main').kill_alone_qf()
             au WinClosed <buffer> ++nested lua require('bqf.main').close_qf()
         aug END
-    ]], false)
+    ]])
 end
 
 function M.disable()
@@ -100,11 +100,7 @@ function M.kill_alone_qf()
 end
 
 function M.close_qf()
-    local winid = fn.expand('<afile>')
-    -- upstream bug
-    -- https://github.com/neovim/neovim/issues/14512
-    winid = tonumber(winid:sub(winid:find('%d+')))
-
+    local winid = tonumber(fn.expand('<afile>'))
     if qfs[winid].bufhidden then
         local qf_bufnr = api.nvim_win_get_buf(winid)
         vim.bo[qf_bufnr].bufhidden = qfs[winid].bufhidden
