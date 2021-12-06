@@ -67,7 +67,7 @@ local function source_list(qwinid, signs)
     })
 
     local bufnr = qwinid and api.nvim_win_get_buf(qwinid) or 0
-    local padding = (' '):rep(headless and headless.padding_nr or utils.gutter_size(qwinid) - 4)
+    local padding = (' '):rep(headless and headless.padding_nr or utils.textoff(qwinid) - 4)
     local sign_ansi = hl_ansi('BqfSign', '^')
     local line_fmt = headless and '%d\t%s%s %s\n' or '%d\t%s%s %s'
 
@@ -177,7 +177,7 @@ local function source_cmd(qwinid, signs)
 
     table.insert(script,
         ([[require('bqf.filter.fzf').headless_run(%s, %d)]]):format(
-            vim.inspect(ansi_tbl, {newline = ''}), utils.gutter_size(qwinid) - 4))
+            vim.inspect(ansi_tbl, {newline = ''}), utils.textoff(qwinid) - 4))
 
     fd:write(table.concat(script, '\n'))
     fd:close()
@@ -204,16 +204,7 @@ local function handler(qwinid, ret)
     local action = action_for[key]
     if #selected_index == 1 then
         idx = selected_index[1]
-        if action == 'tabedit' then
-            set_qf_cursor(qwinid, idx)
-            qhandler.tabedit(false, qwinid, idx)
-        elseif action == 'split' then
-            qhandler.split(false, qwinid, idx)
-        elseif action == 'vsplit' then
-            qhandler.split(true, qwinid, idx)
-        elseif not action then
-            qhandler.open(true, qwinid, idx)
-        end
+        qhandler.open(true, action, qwinid, idx)
         return
     end
 
@@ -328,7 +319,7 @@ function M.run()
     end
     if compare_version(version, '0.27.4') >= 0 then
         table.insert(base_opt, '--scroll-off')
-        table.insert(base_opt, vim.wo[qwinid].so)
+        table.insert(base_opt, utils.scrolloff(qwinid))
     end
 
     vim.list_extend(base_opt, {

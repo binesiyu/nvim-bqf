@@ -177,16 +177,22 @@ function M.matchaddpos(hl, plist, prior)
     return ids
 end
 
-function M.gutter_size(winid)
+function M.textoff(winid)
     vim.validate({winid = {winid, 'number'}})
-    local size
-    M.win_execute(winid, function()
-        local wv = fn.winsaveview()
-        api.nvim_win_set_cursor(winid, {wv.lnum, 0})
-        size = fn.wincol() - 1
-        fn.winrestview(wv)
-    end)
-    return size
+    local textoff
+    if M.is_dev() then
+        textoff = fn.getwininfo(winid).textoff
+    end
+
+    if not textoff then
+        M.win_execute(winid, function()
+            local wv = fn.winsaveview()
+            api.nvim_win_set_cursor(winid, {wv.lnum, 0})
+            textoff = fn.wincol() - 1
+            fn.winrestview(wv)
+        end)
+    end
+    return textoff
 end
 
 function M.is_win_valid(winid)
@@ -317,6 +323,14 @@ function M.gen_is_keyword(bufnr)
     return function(b)
         return tbl[b]
     end
+end
+
+-- TODO upstream bug
+-- local f_win_so = vim.wo[winid].scrolloff
+-- return a big number like '1.4014575443238e+14' if window option is absent
+-- Use getwinvar to workaround
+function M.scrolloff(winid)
+    return fn.getwinvar(winid, '&scrolloff')
 end
 
 function M.tbl_kv_map(func, tbl)

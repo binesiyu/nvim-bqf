@@ -4,6 +4,7 @@ local fn = vim.fn
 
 local utils = require('bqf.utils')
 local log = require('bqf.log')
+local ffi = require('bqf.ffi')
 
 -- Code in this file relates to source code
 -- https://github.com/neovim/neovim/blob/master/src/nvim/window.c
@@ -23,27 +24,55 @@ local function cal_wrow(fraction, height)
 end
 
 -- Check out 'void scroll_to_fraction(win_T *wp, int prev_height)' in winodw.c for more details.
-local function evaluate_sline(fraction, height, lnum, lines_size)
-    local sline = cal_wrow(fraction, height)
-    local i = sline
-    for j = lnum - 1, math.max(1, lnum - sline), -1 do
-        i = i - lines_size[j]
-        if i <= 0 then
-            if i < 0 then
-                sline = sline - lines_size[j] - i
-            end
-            break
+local function evaluate_wrow(fraction, height, lines_size)
+    local wv = fn.winsaveview()
+    local lnum = wv.lnum
+    local wrow = cal_wrow(fraction, height)
+    local line_size = lines_size[0] - 1
+    local sline = wrow - line_size
+    log.debug('wrow:', wrow, 'sline:', sline)
+    if sline >= 0 then
+        -- plines_win(wp, lnum, false)
+        local rows = lines_size[lnum]
+        if sline > height - rows then
+            sline = height - rows
+            wrow = wrow - rows + line_size
         end
     end
-    return sline
+    if sline < 0 then
+        -- TODO extremely edge case
+        wrow = line_size
+    elseif sline > 0 then
+        while sline > 0 and lnum > 1 do
+            lnum = lnum - 1
+            if lnum == wv.topline then
+                -- plines_win_nofill(wp, lnum, true)
+                line_size = lines_size[lnum] + wv.topfill
+            else
+                -- plines_win(wp, lnum, true)
+                line_size = lines_size[lnum]
+            end
+            sline = sline - line_size
+        end
+
+        if sline < 0 then
+            wrow = wrow - line_size - sline
+        elseif sline > 0 then
+            wrow = wrow - sline
+        end
+    end
+    log.debug('evaluated wrow:', wrow, 'fraction:', fraction, 'height:', height)
+    return wrow
 end
 
-local function do_filter(tbl_info, height, lnum, lines_size)
+local function do_filter(frac_list, height, lines_size)
     local t = {}
-    for _, info in ipairs(tbl_info) do
-        local sline = evaluate_sline(info, height, lnum, lines_size)
-        if fn.winline() - 1 == sline then
-            table.insert(t, info)
+    local true_wrow = fn.winline() - 1
+    log.debug('true_wrow:', true_wrow)
+    for _, frac in ipairs(frac_list) do
+        local wrow = evaluate_wrow(frac, height, lines_size)
+        if true_wrow == wrow then
+            table.insert(t, frac)
         end
     end
     return t
@@ -52,7 +81,7 @@ end
 -- If the lnum hasn't been changed, even if the window is resized, the fraction is still a constant.
 -- And we can use this feature to find out the possible fraction with changing window height.
 -- Check out 'void scroll_to_fraction(win_T *wp, int prev_height)' in winodw.c for more details.
-local function filter_fraction(tbl_info, lnum, lines_size, max_hei)
+local function filter_fraction(frac_list, lines_size, max_hei)
     local asc
     local height = api.nvim_win_get_height(0)
     local h = height
@@ -64,26 +93,63 @@ local function filter_fraction(tbl_info, lnum, lines_size, max_hei)
         max_hei = vim.o.lines
     end
 
-    while #tbl_info > 1 do
-        if h <= min_hei or h > max_hei then
-            break
-        end
+    while #frac_list > 1 and h >= min_hei and h <= max_hei do
+        frac_list = do_filter(frac_list, h, lines_size)
         h = asc and h + 1 or h - 1
         api.nvim_win_set_height(0, h)
         if asc and api.nvim_win_get_height(0) ~= h then
             break
         end
-        tbl_info = do_filter(tbl_info, h, lnum, lines_size)
     end
-    api.nvim_win_set_height(0, height)
-    return tbl_info
+
+    if h ~= height then
+        api.nvim_win_set_height(0, height)
+    end
+    return frac_list
 end
 
-function M.cal_wrow(fraction, height)
-    return cal_wrow(fraction, height)
+-- TODO line_size can't handle virt_lines and diff filter
+local function line_size(lnum, col, wrap, per_lwidth)
+    if not wrap then
+        return 1
+    end
+
+    local l
+    if ffi then
+        if col then
+            l = ffi.plines_win_col(lnum, col)
+        else
+            l = ffi.plines_win(lnum)
+        end
+    else
+        if not col then
+            col = '$'
+        end
+        l = math.ceil(math.max(fn.virtcol({lnum, col}) - 1, 1) / per_lwidth)
+    end
+    log.debug(l, lnum)
+    return l
 end
 
-function M.evaluate_fraction(winid, lnum, awrow, aheight, bheight, lbwrow, lfraction)
+-- current line number size may greater than 1, must be consider its value after wrappered, use
+-- 0 as index in lines_size
+local function get_lines_size(winid, pos)
+    local per_lwidth = ffi and 1 or api.nvim_win_get_width(winid) - utils.textoff(winid)
+    local wrap = ffi and true or vim.wo[winid].wrap
+    local lnum, col = unpack(pos)
+    return setmetatable({}, {
+        __index = function(tbl, i)
+            if i == 0 then
+                rawset(tbl, i, line_size(lnum, col, wrap, per_lwidth))
+            else
+                rawset(tbl, i, line_size(i, nil, wrap, per_lwidth))
+            end
+            return tbl[i]
+        end
+    })
+end
+
+function M.evaluate(winid, pos, awrow, aheight, bheight, lbwrow, lfraction)
     -- s_bwrow: the minimum bwrow value
     -- Below formula we can derive from the known conditions
     local s_bwrow = math.ceil(awrow * bheight / aheight - 0.5)
@@ -91,47 +157,34 @@ function M.evaluate_fraction(winid, lnum, awrow, aheight, bheight, lbwrow, lfrac
         return
     end
     -- e_bwrow: the maximum bwrow value
-    -- There are not enough conditions to derive e_bwrow, so we have to figure it out by guessing,
-    -- and confirm the range of bwrow.
-    -- It seems that 10 as a minimum and 1.2 as a scale is good to balance performance and accuracy
-    local e_bwrow = math.max(10, math.ceil(awrow * 1.2 * bheight / aheight - 0.25))
+    -- There are not enough conditions to derive e_bwrow, so we have to figure it out by
+    -- guessing, and confirm the range of bwrow. It seems that s_bwrow plug 5 as a minimum and
+    -- 1.2 as a scale is good to balance performance and accuracy
+    local e_bwrow = math.max(s_bwrow + 5, math.ceil(awrow * 1.2 * bheight / aheight - 0.25))
 
-    local per_l_wid = api.nvim_win_get_width(winid) - utils.gutter_size(winid)
+    local lines_size = get_lines_size(winid, pos)
 
-    local e_fraction = cal_fraction(e_bwrow, bheight)
-    local e_sline = cal_wrow(e_fraction, aheight)
-
-    if lbwrow then
-        e_sline = math.max(cal_wrow(lfraction, aheight), e_sline)
+    if lbwrow and awrow == evaluate_wrow(lfraction, aheight, lines_size) then
+        return lfraction, awrow
     end
 
-    local lines_size = {}
-    local wrap = vim.wo[winid].wrap
-    -- use 9 as additional compensation
-    for i = math.max(1, lnum - e_sline - 9), lnum - 1 do
-        lines_size[i] = wrap and math.ceil(math.max(fn.virtcol({i, '$'}) - 1, 1) / per_l_wid) or 1
-    end
-
-    if lbwrow and awrow == evaluate_sline(lfraction, aheight, lnum, lines_size) then
-        return lfraction
-    end
-
-    local t_frac = {}
+    local frac_list = {}
     for bw = s_bwrow, e_bwrow do
-        table.insert(t_frac, cal_fraction(bw, bheight))
+        table.insert(frac_list, cal_fraction(bw, bheight))
     end
-    log.debug('before t_frac', t_frac)
+    log.debug('before frac_list', frac_list)
 
-    t_frac = filter_fraction(t_frac, lnum, lines_size)
+    frac_list = filter_fraction(frac_list, lines_size)
 
-    log.debug('first t_frac:', t_frac)
+    log.debug('first frac_list:', frac_list)
 
-    t_frac = filter_fraction(t_frac, lnum, lines_size, aheight + 9)
+    frac_list = filter_fraction(frac_list, lines_size, aheight + 9)
 
-    log.debug('second t_frac:', t_frac)
+    log.debug('second frac_list:', frac_list)
 
-    if #t_frac > 0 then
-        return t_frac[1]
+    if #frac_list > 0 then
+        local fraction = frac_list[1]
+        return fraction, evaluate_wrow(fraction, bheight, lines_size)
     end
 end
 
@@ -171,13 +224,13 @@ function M.tune_line(winid, topline, lsizes)
         folded_other_lnum = fn.foldclosedend
     end
 
-    if vim.wo[winid].foldenable then
+    if not vim.wo[winid].foldenable then
         folded_other_lnum = neg_one
     end
     log.debug(i_start, i_end, i_inc, len)
 
     return utils.win_execute(winid, function()
-        local per_l_wid = api.nvim_win_get_width(winid) - utils.gutter_size(winid)
+        local per_lwidth = ffi and 1 or api.nvim_win_get_width(winid) - utils.textoff(winid)
         local loff, lsize_sum = 0, 0
         local i = i_start
         while should_continue(i) do
@@ -185,9 +238,9 @@ function M.tune_line(winid, topline, lsizes)
             log.debug('i:', i, 'i_end:', i_end)
             local fo_lnum = folded_other_lnum(i)
             if fo_lnum == -1 then
-                local per_l_size = math.ceil(math.max(fn.virtcol({i, '$'}) - 1, 1) / per_l_wid)
-                log.debug('lsize_sum:', lsize_sum, 'per_l_size:', per_l_size, 'lnum:', i)
-                lsize_sum = lsize_sum + per_l_size
+                local lsize = line_size(i, nil, true, per_lwidth)
+                log.debug('lsize_sum:', lsize_sum, 'lsize:', lsize, 'lnum:', i)
+                lsize_sum = lsize_sum + lsize
                 loff = loff + 1
             else
                 log.debug('fo_lnum:', fo_lnum)
