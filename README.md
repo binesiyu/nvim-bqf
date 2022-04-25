@@ -43,6 +43,9 @@ So why not nvim-bqf?
 * [Advanced configuration](#advanced-configuration)
   * [Customize configuration](#customize-configuration)
   * [Integrate with other plugins](#integrate-with-other-plugins)
+* [Customize quickfix window (Easter egg)](#customize-quickfix-window-easter-egg)
+  * [Format new quickfix](#format-new-quickfix)
+  * [Rebuild syntax for quickfix](#rebuild-syntax-for-quickfix)
 * [Feedback](#feedback)
 * [License](#license)
 
@@ -67,9 +70,7 @@ So why not nvim-bqf?
 
 - [Neovim](https://github.com/neovim/neovim) 0.5 or later
 - [fzf](https://github.com/junegunn/fzf) (optional, 0.24.0 later)
-
-> Preview with fzf needs a pipe, Windows can't be supported. It must be stated that
-> I'm not working under Windows.
+- [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) (optional)
 
 ### Installation
 
@@ -123,7 +124,16 @@ open up an item in a new tab, a new horizontal split, or in a new vertical split
 fzf becomes a quickfix filter and create a new quickfix list when multiple items are selected and
 accepted.
 
-fzf also support `ctrl-q` to toggle items' sign.
+nvim-bqf also supports `ctrl-q` to toggle items' sign and adapts
+`preview-half-page-up`, `preview-half-page-down` and `toggle-preview` fzf's actions for preview.
+
+Please run `man fzf` and check out `KEY/EVENT BINDINGS` section for details.
+
+There're two ways to adapt fzf's actions for preview function, use `ctrl-f`and `ctrl-b` keys as example.
+
+1. Make `$FZF_DEFAULT_OPTS` contains `--bind=ctrl-f:preview-half-page-down,ctrl-b:preview-half-page-up`;
+2. Inject `extra_opts = {'--bind', 'ctrl-f:preview-half-page-down,ctrl-b:preview-half-page-up'}` to
+   `setup` function;
 
 #### Filter items with signs demo
 
@@ -161,7 +171,7 @@ but exclude `session.lua` file.
         description = [[resize quickfix window height automatically.
             Shrink higher height to size of list in quickfix window, otherwise extend height
             to size of list or to default height (10)]],
-        default = true
+        default = false
     },
     preview = {
         auto_preview = {
@@ -178,7 +188,8 @@ but exclude `session.lua` file.
             default = 50
         },
         win_height = {
-            description = [[the height of preview window for horizontal layout]],
+            description = [[the height of preview window for horizontal layout,
+                large value (like 999) perform preview window as a "full" mode]],
             default = 15
         },
         win_vheight = {
@@ -191,7 +202,7 @@ but exclude `session.lua` file.
         },
         should_preview_cb = {
             description = [[a callback function to decide whether to preview while switching buffer,
-                with a bufnr parameter]],
+                with (bufnr: number, qwinid: number) parameters]],
             default = nil
         }
     },
@@ -217,6 +228,10 @@ but exclude `session.lua` file.
                 ['ctrl-q'] = {
                     description = [[press ctrl-q to toggle sign for the selected items]],
                     default = 'signtoggle'
+                },
+                ['ctrl-c'] = {
+                    description = [[press ctrl-c to close quickfix window and abort fzf]],
+                    default = 'closeall'
                 }
             },
             extra_opts = {
@@ -261,7 +276,7 @@ about current configuration.
 | sclear      | clear the signs in current quickfix list                   | `z<Tab>`  |
 | pscrollup   | scroll up half-page in preview window                      | `<C-b>`   |
 | pscrolldown | scroll down half-page in preview window                    | `<C-f>`   |
-| pscrollorig | scroll back to original postion in preview window          | `zo`      |
+| pscrollorig | scroll back to original position in preview window         | `zo`      |
 | ptogglemode | toggle preview window between normal and max size          | `zp`      |
 | ptoggleitem | toggle preview for an item of quickfix list                | `p`       |
 | ptoggleauto | toggle auto preview when cursor moved                      | `P`       |
@@ -327,7 +342,7 @@ local cmd = vim.cmd
 local api = vim.api
 local fn = vim.fn
 
-local function create_qf()
+local function createQf()
     cmd('enew')
     local bufnr = api.nvim_get_current_buf()
     local lines = {}
@@ -341,41 +356,41 @@ local function create_qf()
     })
 end
 
-function _G.bqf_pattern()
-    create_qf()
-    fn.setqflist({}, 'r', {context = {bqf = {pattern_hl = [[\d\+]]}}, title = 'pattern_hl'})
+function _G.bqfPattern()
+    createQf()
+    fn.setqflist({}, 'r', {context = {bqf = {pattern_hl = [[\d\+]]}}, title = 'patternHl'})
     cmd('cw')
 end
 
-function _G.bqf_lsp_ranges()
-    create_qf()
-    local lsp_ranges = {}
-    table.insert(lsp_ranges,
+function _G.bqfLspRanges()
+    createQf()
+    local lspRanges = {}
+    table.insert(lspRanges,
         {start = {line = 0, character = 4}, ['end'] = {line = 0, character = 8}})
-    table.insert(lsp_ranges,
+    table.insert(lspRanges,
         {start = {line = 1, character = 9}, ['end'] = {line = 1, character = 11}})
-    table.insert(lsp_ranges,
+    table.insert(lspRanges,
         {start = {line = 2, character = 12}, ['end'] = {line = 2, character = 14}})
-    fn.setqflist({}, 'r', {context = {bqf = {lsp_ranges_hl = lsp_ranges}}, title = 'lsp_ranges_hl'})
+    fn.setqflist({}, 'r', {context = {bqf = {lsp_ranges_hl = lspRanges}}, title = 'lspRangesHl'})
     cmd('cw')
 end
 
-function _G.qf_ranges()
+function _G.qfRanges()
     if fn.has('nvim-0.6') == 1 then
-        create_qf()
+        createQf()
         local items = fn.getqflist()
         local it1, it2, it3 = items[1], items[2], items[3]
         it1.end_lnum, it1.end_col = it1.lnum, it1.col + 4
         it2.end_lnum, it2.end_col = it2.lnum, it2.col + 2
         it3.end_lnum, it3.end_col = it3.lnum, it3.col + 2
-        fn.setqflist({}, 'r', {items = items, title = 'qf_ranges_hl'})
+        fn.setqflist({}, 'r', {items = items, title = 'qfRangesHl'})
         cmd('cw')
     else
         error([[couldn't support quickfix ranges highlight before Neovim 0.6]])
     end
 end
 
--- Save and source me(`so %`). Run `:lua bqf_pattern()`, `:lua bqf_lsp_ranges()` and `:lua qf_ranges()`
+-- Save and source me(`so %`). Run `:lua bqfPattern()`, `:lua bqfLspRanges()` and `:lua qfRanges()`
 ```
 
 nvim-bqf actually works with context in
@@ -410,17 +425,21 @@ vim.cmd([[
 
 require('bqf').setup({
     auto_enable = true,
+    auto_resize_height = true, -- highly recommended enable
     preview = {
         win_height = 12,
         win_vheight = 12,
         delay_syntax = 80,
         border_chars = {'┃', '┃', '━', '━', '┏', '┓', '┗', '┛', '█'},
-        should_preview_cb = function(bufnr)
+        should_preview_cb = function(bufnr, qwinid)
             local ret = true
-            local filename = vim.api.nvim_buf_get_name(bufnr)
-            local fsize = vim.fn.getfsize(filename)
-            -- file size greater than 100k can't be previewed automatically
+            local bufname = vim.api.nvim_buf_get_name(bufnr)
+            local fsize = vim.fn.getfsize(bufname)
             if fsize > 100 * 1024 then
+                -- skip file size greater than 100k
+                ret = false
+            elseif bufname:match('^fugitive://') then
+                -- skip fugitive buffer
                 ret = false
             end
             return ret
@@ -485,7 +504,7 @@ vim.g.coc_enable_locationlist = 0
 cmd([[
     aug Coc
         au!
-        au User CocLocationsChange ++nested lua _G.jump2loc()
+        au User CocLocationsChange lua _G.jumpToLoc()
     aug END
 ]])
 
@@ -496,16 +515,9 @@ cmd([[
 
 -- just use `_G` prefix as a global function for a demo
 -- please use module instead in reality
-function _G.jump2loc(locs)
+function _G.jumpToLoc(locs)
     locs = locs or vim.g.coc_jump_locations
-    local loc_ranges = vim.tbl_map(function(val)
-        return val.range
-    end, locs)
-    fn.setloclist(0, {}, ' ', {
-        title = 'CocLocationList',
-        items = locs,
-        context = {bqf = {lsp_ranges_hl = loc_ranges}}
-    })
+    fn.setloclist(0, {}, ' ', {title = 'CocLocationList', items = locs})
     local winid = fn.getloclist(0, {winid = 0}).winid
     if winid == 0 then
         cmd('abo lw')
@@ -517,31 +529,127 @@ end
 function _G.diagnostic()
     fn.CocActionAsync('diagnosticList', '', function(err, res)
         if err == vim.NIL then
-            local items, loc_ranges = {}, {}
+            local items = {}
             for _, d in ipairs(res) do
                 local text = ('[%s%s] %s'):format((d.source == '' and 'coc.nvim' or d.source),
                     (d.code == vim.NIL and '' or ' ' .. d.code), d.message:match('([^\n]+)\n*'))
                 local item = {
                     filename = d.file,
                     lnum = d.lnum,
+                    end_lnum = d.end_lnum,
                     col = d.col,
+                    end_col = d.end_col,
                     text = text,
                     type = d.severity
                 }
-                table.insert(loc_ranges, d.location.range)
                 table.insert(items, item)
             end
-            fn.setqflist({}, ' ', {
-                title = 'CocDiagnosticList',
-                items = items,
-                context = {bqf = {lsp_ranges_hl = loc_ranges}}
-            })
+            fn.setqflist({}, ' ', {title = 'CocDiagnosticList', items = items})
 
             cmd('bo cope')
         end
     end)
 end
+-- you can also subscribe User `CocDiagnosticChange` event to reload your diagnostic in quickfix
+-- dynamically, enjoy yourself or find my configuration :)
+```
 
+## Customize quickfix window (Easter egg)
+
+Quickfix window default UI is extremely outdated and low level aesthetics. However, you can
+dress up your personal quickfix window:) Here is the configuration for demo:
+
+> This section is not `nvim-bqf` exclusive, you can use the configuration without `nvim-bqf`
+
+### Format new quickfix
+
+Set `quickfixtextfunc` option and write down corresponding function:
+
+```lua
+local fn = vim.fn
+
+function _G.qftf(info)
+    local items
+    local ret = {}
+    if info.quickfix == 1 then
+        items = fn.getqflist({id = info.id, items = 0}).items
+    else
+        items = fn.getloclist(info.winid, {id = info.id, items = 0}).items
+    end
+    local limit = 31
+    local fnameFmt1, fnameFmt2 = '%-' .. limit .. 's', '…%.' .. (limit - 1) .. 's'
+    local validFmt = '%s │%5d:%-3d│%s %s'
+    for i = info.start_idx, info.end_idx do
+        local e = items[i]
+        local fname = ''
+        local str
+        if e.valid == 1 then
+            if e.bufnr > 0 then
+                fname = fn.bufname(e.bufnr)
+                if fname == '' then
+                    fname = '[No Name]'
+                else
+                    fname = fname:gsub('^' .. vim.env.HOME, '~')
+                end
+                -- char in fname may occur more than 1 width, ignore this issue in order to keep performance
+                if #fname <= limit then
+                    fname = fnameFmt1:format(fname)
+                else
+                    fname = fnameFmt2:format(fname:sub(1 - limit))
+                end
+            end
+            local lnum = e.lnum > 99999 and -1 or e.lnum
+            local col = e.col > 999 and -1 or e.col
+            local qtype = e.type == '' and '' or ' ' .. e.type:sub(1, 1):upper()
+            str = validFmt:format(fname, lnum, col, qtype, e.text)
+        else
+            str = e.text
+        end
+        table.insert(ret, str)
+    end
+    return ret
+end
+
+vim.o.qftf = '{info -> v:lua._G.qftf(info)}'
+
+-- Adapt fzf's delimiter in nvim-bqf
+require('bqf').setup({
+    filter = {
+        fzf = {
+            extra_opts = {'--bind', 'ctrl-o:toggle-all', '--delimiter', '│'}
+        }
+    }
+})
+```
+
+### Rebuild syntax for quickfix
+
+Add `qf.vim` under your syntax path, for instance: `~/.config/nvim/syntax/qf.vim`
+
+```vim
+if exists('b:current_syntax')
+    finish
+endif
+
+syn match qfFileName /^[^│]*/ nextgroup=qfSeparatorLeft
+syn match qfSeparatorLeft /│/ contained nextgroup=qfLineNr
+syn match qfLineNr /[^│]*/ contained nextgroup=qfSeparatorRight
+syn match qfSeparatorRight '│' contained nextgroup=qfError,qfWarning,qfInfo,qfNote
+syn match qfError / E .*$/ contained
+syn match qfWarning / W .*$/ contained
+syn match qfInfo / I .*$/ contained
+syn match qfNote / [NH] .*$/ contained
+
+hi def link qfFileName Directory
+hi def link qfSeparatorLeft Delimiter
+hi def link qfSeparatorRight Delimiter
+hi def link qfLineNr LineNr
+hi def link qfError CocErrorSign
+hi def link qfWarning CocWarningSign
+hi def link qfInfo CocInfoSign
+hi def link qfNote CocHintSign
+
+let b:current_syntax = 'qf'
 ```
 
 ## Feedback

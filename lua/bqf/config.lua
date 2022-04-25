@@ -1,12 +1,36 @@
+---@class BqfConfig
+---@field auto_enable boolean
+---@field magic_window boolean
+---@field auto_resize_height boolean
+---@field preview BqfConfigPreview
+---@field func_map table<string, string>
+---@field filter BqfConfigFilter
 local config = {}
+
+---@class BqfConfigPreview
+---@field auto_preview boolean
+---@field border_chars string[]
+---@field delay_syntax number
+---@field win_height number
+---@field win_vheight number
+---@field wrap boolean
+---@field should_preview_cb fun(bufnr: number, qwinid: number): boolean
+
+---@class BqfConfigFilter
+---@field fzf BqfConfigFilterFzf
+
+---@class BqfConfigFilterFzf
+---@field action_for table<string, string>
+---@field extra_opts string[]
 
 local function init()
     local bqf = require('bqf')
     vim.validate({config = {bqf._config, 'table', true}})
-    config = vim.tbl_deep_extend('keep', bqf._config or {}, {
+    ---@type BqfConfig
+    local def = {
         auto_enable = true,
         magic_window = true,
-        auto_resize_height = true,
+        auto_resize_height = false,
         preview = {
             auto_preview = true,
             border_chars = {'│', '│', '─', '─', '╭', '╮', '╰', '╯', '█'},
@@ -52,12 +76,14 @@ local function init()
                     ['ctrl-t'] = 'tabedit',
                     ['ctrl-v'] = 'vsplit',
                     ['ctrl-x'] = 'split',
-                    ['ctrl-q'] = 'signtoggle'
+                    ['ctrl-q'] = 'signtoggle',
+                    ['ctrl-c'] = 'closeall'
                 },
                 extra_opts = {'--bind', 'ctrl-o:toggle-all'}
             }
         }
-    })
+    }
+    config = vim.tbl_deep_extend('keep', bqf._config or {}, def)
     bqf._config = nil
 end
 

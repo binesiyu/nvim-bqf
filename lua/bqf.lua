@@ -1,8 +1,10 @@
+---@class Bqf
 local M = {}
 local api = vim.api
 local initialized = false
-local auto_enable
+local autoEnable
 
+---@param opts? BqfConfig
 function M.setup(opts)
     if initialized then
         return
@@ -10,9 +12,9 @@ function M.setup(opts)
 
     opts = opts or {}
     if opts.auto_enable == false then
-        auto_enable = false
+        autoEnable = false
     else
-        auto_enable = true
+        autoEnable = true
     end
     -- M._config will become nil latter
     M._config = opts
@@ -21,8 +23,10 @@ end
 
 function M.bootstrap()
     M.setup()
-    if auto_enable then
-        require('bqf.main').enable()
+    if autoEnable then
+        M.enable()
+    else
+        M.disable()
     end
 end
 
@@ -38,9 +42,9 @@ function M.toggle()
     require('bqf.main').toggle()
 end
 
-function M.toggle_auto()
-    auto_enable = auto_enable ~= true
-    if auto_enable then
+function M.toggleAuto()
+    autoEnable = autoEnable ~= true
+    if autoEnable then
         api.nvim_echo({{'Enable nvim-bqf automatically', 'WarningMsg'}}, true, {})
     else
         api.nvim_echo({{'Disable nvim-bqf automatically', 'WarningMsg'}}, true, {})
