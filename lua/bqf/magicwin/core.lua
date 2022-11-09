@@ -5,7 +5,7 @@ local fn = vim.fn
 
 local LSize = require('bqf.magicwin.lsize')
 local utils = require('bqf.utils')
-local log = require('bqf.log')
+local log = require('bqf.lib.log')
 
 -- Code in this file relates to source code
 -- https://github.com/neovim/neovim/blob/master/src/nvim/window.c
@@ -150,7 +150,7 @@ end
 ---@param awrow number
 ---@param aheight number
 ---@param bheight number
----@return number
+---@return number?
 function M.evaluate(awrow, aheight, bheight)
     -- loBWrow: the minimum bwrow value
     -- Below formula we can derive from the known conditions
@@ -169,7 +169,7 @@ function M.evaluate(awrow, aheight, bheight)
     local hiBWrow = math.max(loBWrow + 8, math.ceil(awrow * 1.2 * bheight / aheight - 0.25))
     log.debug('loBWrow:', loBWrow, 'hiBWrow:', hiBWrow)
 
-    local lsizeObj = LSize:new()
+    local lsizeObj = LSize:new(api.nvim_get_current_win())
 
     local fractionList = {}
     for bw = loBWrow, hiBWrow do
@@ -201,11 +201,11 @@ end
 ---@param lsizes BqfLFFI|BqfLNonFFI
 ---@return number, number
 function M.tuneTop(winid, topline, lsizes)
-    return utils.winExecute(winid, function()
+    return utils.winCall(winid, function()
         local iStart, iEnd, iInc, shouldContinue, len
         local foldedOtherLnum
 
-        local lsizeObj = LSize:new()
+        local lsizeObj = LSize:new(winid)
         if lsizes > 0 then
             iStart, iEnd, iInc = topline - 1, math.max(1, topline - lsizes), -1
             shouldContinue = function(iter)
@@ -236,16 +236,16 @@ function M.tuneTop(winid, topline, lsizes)
         while lsizeSum < len and shouldContinue(i) do
             log.debug('=====================================================')
             log.debug('i:', i, 'iEnd:', iEnd)
-            local foLnum = foldedOtherLnum(i)
-            if foLnum == -1 then
+            local foldLnum = foldedOtherLnum(i)
+            if foldLnum == -1 then
                 local lsize = lsizeObj:size(i)
                 log.debug('lsizeSum:', lsizeSum, 'lsize:', lsize, 'lnum:', i)
                 lsizeSum = lsizeSum + lsize
             else
-                log.debug('foLnum:', foLnum)
+                log.debug('foldLnum:', foldLnum)
                 lsizeSum = lsizeSum + 1
-                iEnd = iEnd + foLnum - i
-                i = foLnum
+                iEnd = iEnd + foldLnum - i
+                i = foldLnum
             end
             log.debug('=====================================================')
             topline = i

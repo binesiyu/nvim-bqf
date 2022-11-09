@@ -4,37 +4,9 @@ local fn = vim.fn
 local list = require('bqf.qfwin.list')
 local utils = require('bqf.utils')
 
----
----@return fun(winid?: number): boolean
-local validate = (function()
-    if utils.has06() then
-        return function(winid)
-            local winType = fn.win_gettype(winid)
-            return winType == 'quickfix' or winType == 'loclist'
-        end
-    else
-        return function(winid)
-            winid = winid or api.nvim_get_current_win()
-            local ok, ret
-            ok = pcall(function()
-                ret = utils.getWinInfo(winid).quickfix == 1
-            end)
-            return ok and ret
-        end
-    end
-end)()
-
-local isNormalWinType = (function()
-    if utils.has06() then
-        return function(winid)
-            return fn.win_gettype(winid) == ''
-        end
-    else
-        return function(winid)
-            return not validate(winid) and fn.win_gettype(winid) == ''
-        end
-    end
-end)()
+local function isNormalWinType(winid)
+    return fn.win_gettype(winid) == ''
+end
 
 ---
 ---@param winid number
@@ -82,16 +54,17 @@ function QfSession:previousWinid()
     if not utils.isWinValid(self._pwinid) or fn.win_gettype(self._pwinid) ~= '' then
         self._pwinid = getPwinid(self.winid, self._list)
     end
-    return self._pwinid
+    return utils.isWinValid(self._pwinid) and self._pwinid or -1
 end
 
 function QfSession:validate()
-    return validate(self.winid)
+    local winType = fn.win_gettype(self.winid)
+    return winType == 'quickfix' or winType == 'loclist'
 end
 
 ---
 ---@param winid number
----@return BqfQfSession
+---@return BqfQfSession?
 function QfSession:new(winid)
     local obj = {}
     setmetatable(obj, self)
@@ -118,7 +91,7 @@ end
 function QfSession:saveWinView(winid)
     if winid then
         local obj = self.pool[winid]
-        local wv = utils.winExecute(winid, fn.winsaveview)
+        local wv = utils.winCall(winid, fn.winsaveview)
         obj:list():setWinView(wv)
     end
 end

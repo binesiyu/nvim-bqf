@@ -25,16 +25,18 @@ function M.enable()
     end
 
     local qwinid = api.nvim_get_current_win()
-
     local qs = qfs:new(qwinid)
     assert(qs, 'It is not a quickfix window')
-
+    local qlist = qs:list()
+    if qlist:changedtick() == 0 then
+        return
+    end
     vim.wo.nu, vim.wo.rnu = true, false
     vim.wo.wrap = false
     vim.wo.foldenable, vim.wo.foldcolumn = false, '0'
     vim.wo.signcolumn = 'number'
 
-    local adjustHeightCallBack = layout.initialize(qwinid)
+    local adjustHeightCallback = layout.initialize(qwinid)
     preview.initialize(qwinid)
     keymap.initialize()
 
@@ -50,7 +52,7 @@ function M.enable()
     -- TODO
     -- After WinClosed callback in magic window, WinClosed in main can't be fired.
     -- WinClosed event in magic window must after in main
-    magicwin.attach(qwinid, pwinid, nil, adjustHeightCallBack)
+    magicwin.attach(qwinid, pwinid, nil, adjustHeightCallback)
     vim.b.bqf_enabled = true
 end
 
@@ -78,12 +80,13 @@ local function close(winid)
                 cmd('new')
                 api.nvim_win_close(winid, true)
             end
+
             -- after nvim 0.7+ Vim:E242 Can't split a window while closing another
             if not pcall(closeLastWin) then
                 -- less redraw
                 cmd('noa enew')
                 local bufnr = api.nvim_get_current_buf()
-                vim.schedule(function ()
+                vim.schedule(function()
                     closeLastWin()
                     cmd('noa bw ' .. bufnr)
                 end)

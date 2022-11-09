@@ -8,11 +8,11 @@ local uv = vim.loop
 local mgws = require('bqf.magicwin.session')
 local wpos = require('bqf.wpos')
 local utils = require('bqf.utils')
-local log = require('bqf.log')
+local log = require('bqf.lib.log')
 local mcore = require('bqf.magicwin.core')
 local config = require('bqf.config')
 
-local enable
+local mayEnable
 
 local POS = wpos.POS
 local LNUM = {KEEP = 0, UP = 1, DOWN = 2}
@@ -30,7 +30,7 @@ end
 
 local function guessBwrow(qwinid, winid)
     log.debug('guessBwrow start')
-    local bwrow = utils.winExecute(winid, function()
+    local bwrow = utils.winCall(winid, function()
         local qfHeight, winHeight = api.nvim_win_get_height(qwinid), api.nvim_win_get_height(winid)
         local lineCount = api.nvim_buf_line_count(0)
         local qbufnr = api.nvim_win_get_buf(qwinid)
@@ -58,7 +58,7 @@ local function guessBwrow(qwinid, winid)
 end
 
 local function resetWinTop(qwinid, winid, qfPos, bwrow)
-    utils.winExecute(winid, function()
+    utils.winCall(winid, function()
         local qbufnr = api.nvim_win_get_buf(qwinid)
         local aws = mgws:adjacentWin(qbufnr, winid)
         local winView = fn.winsaveview()
@@ -69,7 +69,9 @@ local function resetWinTop(qwinid, winid, qfPos, bwrow)
         local qfHeight, winHeight = api.nvim_win_get_height(qwinid), api.nvim_win_get_height(winid)
         local bheight, aheight = aws.height or qfHeight + winHeight + 1, winHeight
         if qfPos[1] == POS.ABOVE or qfPos[2] == POS.TOP then
-            deltaLineSize = deltaLineSize - bheight + aheight
+            -- botline may be greater than real because one line not always one size
+            local botline = fn.line('w$')
+            deltaLineSize = deltaLineSize - math.min(bheight - aheight, botline - 1)
         end
 
         log.debug('before topline:', topline, 'deltaLsize:', deltaLineSize)
@@ -155,8 +157,8 @@ function M.resetWinView(qbufnr)
         end
         for _, winid in ipairs(api.nvim_tabpage_list_wins(0)) do
             local aws = mgws:adjacentWin(qbufnr, winid)
-            if aws and aws.winView then
-                utils.winExecute(winid, function()
+            if type(aws.winView) == 'table' and not vim.tbl_isempty(aws.winView) then
+                utils.winCall(winid, function()
                     local hrtime = aws.hrtime or 0
                     local winView = aws.winView
                     local lnum, col = winView.lnum, winView.col + 1
@@ -205,7 +207,7 @@ local function keepContext(func)
     end
 end
 
-local function revertOpeningWins(qwinid, pwinid, qfPos, layoutCallBack)
+local function revertOpeningWins(qwinid, pwinid, qfPos, layoutCallback)
     if not needRevert(qfPos) then
         return
     end
@@ -233,8 +235,8 @@ local function revertOpeningWins(qwinid, pwinid, qfPos, layoutCallBack)
             end
         end
     end)
-    if type(layoutCallBack) == 'function' then
-        layoutCallBack()
+    if type(layoutCallback) == 'function' then
+        layoutCallback()
     end
     for winid, bwrow in pairs(bwrows) do
         resetWinTop(qwinid, winid, qfPos, bwrow)
@@ -244,7 +246,7 @@ local function revertOpeningWins(qwinid, pwinid, qfPos, layoutCallBack)
     end
 end
 
-local function revertClosingWins(qwinid, pwinid, qfPos, layoutCallBack)
+local function revertClosingWins(qwinid, pwinid, qfPos, layoutCallback)
     if not needRevert(qfPos) then
         return
     end
@@ -253,7 +255,7 @@ local function revertClosingWins(qwinid, pwinid, qfPos, layoutCallBack)
     for _, winid in ipairs(wpos.findAdjacentWins(qwinid, pwinid)) do
         local aws = mgws:adjacentWin(qbufnr, winid)
         if aws and aws.winView then
-            local winView = utils.winExecute(winid, fn.winsaveview)
+            local winView = utils.winCall(winid, fn.winsaveview)
             if aws.tuneLnum == LNUM.KEEP then
                 aws.winView = {}
             end
@@ -266,36 +268,36 @@ local function revertClosingWins(qwinid, pwinid, qfPos, layoutCallBack)
         end
     end
 
-    if type(layoutCallBack) == 'function' then
-        layoutCallBack()
+    if type(layoutCallback) == 'function' then
+        layoutCallback()
     end
     for winid, aws in pairs(mgws:get(qbufnr)) do
         if aws and aws.winView and aws.winView.topline and utils.isWinValid(winid) then
             log.debug('revertClosingWins:', aws.winView, '\n')
-            utils.winExecute(winid, function()
+            utils.winCall(winid, function()
                 mcore.resetView(aws.winView)
             end)
         end
     end
 end
 
-local function open(winid, lastWinid, layoutCallBack)
-    if not enable then
+local function open(winid, lastWinid, layoutCallback)
+    if not mayEnable() then
         return
     end
     local pos = wpos.getPos(winid, lastWinid)
-    revertOpeningWins(winid, lastWinid, pos, layoutCallBack)
+    revertOpeningWins(winid, lastWinid, pos, layoutCallback)
 end
 
 function M.close(winid, lastWinid, bufnr)
-    if not utils.isWinValid(winid) or not enable then
+    if not utils.isWinValid(winid) or not mayEnable() then
         return
     end
 
     local pos = wpos.getPos(winid, lastWinid)
     local winnr = fn.win_id2win(winid)
     local winJ, winL
-    utils.winExecute(winid, function()
+    utils.winCall(winid, function()
         winJ, winL = fn.winnr('j'), fn.winnr('l')
     end)
 
@@ -360,18 +362,18 @@ end
 ---@param winid? number
 ---@param lastWinid? number
 ---@param bufnr? number
----@param layoutCallBack? fun()
-function M.attach(winid, lastWinid, bufnr, layoutCallBack)
-    if not enable then
-        if type(layoutCallBack) == 'function' then
-            layoutCallBack()
+---@param layoutCallback? fun()
+function M.attach(winid, lastWinid, bufnr, layoutCallback)
+    if not mayEnable() then
+        if type(layoutCallback) == 'function' then
+            layoutCallback()
         end
         return
     end
     winid = winid or api.nvim_get_current_win()
     lastWinid = lastWinid or fn.win_getid(fn.winnr('#'))
     bufnr = bufnr or api.nvim_win_get_buf(winid)
-    open(winid, lastWinid, layoutCallBack)
+    open(winid, lastWinid, layoutCallback)
     cmd(([[
         aug BqfMagicWin
             au! * <buffer>
@@ -393,7 +395,14 @@ local function init()
             au!
         aug END
     ]])
-    enable = config.magic_window
+
+    local enable = config.magic_window
+    local hasSplitkeep = pcall(function()
+        return vim.o.splitkeep
+    end)
+    mayEnable = function()
+        return enable and (not hasSplitkeep or vim.o.splitkeep == 'cursor')
+    end
 end
 
 init()

@@ -24,6 +24,7 @@ function FloatWin:build(o)
     self.winHeight = o.winHeight
     self.winVHeight = o.winHheight
     self.wrap = o.wrap
+    self.focusable = o.focusable or false
     self.winid = nil
     self.bufnr = nil
     return self
@@ -46,12 +47,12 @@ function FloatWin:calculateWinOpts()
         col = 1
         if relPos == POS.ABOVE or absPos == POS.TOP then
             anchor = 'NW'
-            height = math.min(self.winHeight, vim.o.lines - 4 - rowPos - qinfo.height)
+            height = math.min(self.winHeight, vim.o.lines - 2 - vim.o.cmdheight - rowPos - qinfo.height)
             row = qinfo.height + 2
         else
             anchor = 'SW'
             height = math.min(self.winHeight, rowPos - 4)
-            row = -2
+            row = -2 - (utils.hasWinBar(self.qwinid) and 1 or 0)
         end
     elseif relPos == POS.LEFT or relPos == POS.RIGHT or absPos == POS.LEFT_FAR or absPos ==
         POS.RIGHT_FAR then
@@ -63,7 +64,7 @@ function FloatWin:calculateWinOpts()
             width = api.nvim_win_get_width(self.pwinid) - 2
         end
         height = math.min(self.winVHeight, qinfo.height - 2)
-        local winline = fn.winline()
+        local winline = utils.winCall(self.qwinid, fn.winline)
         row = height >= winline and 1 or winline - height - 1
         if relPos == POS.LEFT or absPos == POS.LEFT_FAR then
             anchor = 'NW'
@@ -83,7 +84,7 @@ function FloatWin:calculateWinOpts()
     return {
         relative = 'win',
         win = self.qwinid,
-        focusable = false,
+        focusable = self.focusable,
         anchor = anchor,
         width = width,
         height = height,

@@ -6,64 +6,63 @@ local utils
 local C
 local ffi
 
-local function curWinid()
-    local curWin
-    if utils.isWindows() then
-        local err = ffi.new('Error')
-        curWin = C.find_window_by_handle(0, err)
-    else
-        curWin = C.curwin
-    end
-    return curWin
+local function findWin(winid)
+    local err = ffi.new('Error')
+    return C.find_window_by_handle(winid, err)
 end
 
 ---
+---@param winid number
 ---@param lnum number
 ---@return number
-function M.plinesWin(lnum)
-    return C.plines_win(curWinid(), lnum, true)
+function M.plinesWin(winid, lnum)
+    local wp = findWin(winid)
+    return C.plines_win(wp, lnum, true)
 end
 
 ---
+---@param winid number
 ---@param lnum number
 ---@param col number
 ---@return number
-function M.plinesWinCol(lnum, col)
-    return C.plines_win_col(curWinid(), lnum, col)
+function M.plinesWinCol(winid, lnum, col)
+    local wp = findWin(winid)
+    return C.plines_win_col(wp, lnum, col)
 end
 
 ---
+---@param winid number
 ---@param lnum number
----@param winheight number
+---@param winheight boolean
 ---@return number
-function M.plinesWinNofill(lnum, winheight)
-    return C.plines_win_nofill(curWinid(), lnum, winheight)
+function M.plinesWinNofill(winid, lnum, winheight)
+    local wp = findWin(winid)
+    return C.plines_win_nofill(wp, lnum, winheight)
 end
 
 local function init()
     ffi = require('ffi')
     setmetatable(M, {__index = ffi})
     C = ffi.C
-    ffi.cdef([[
-        typedef struct window_S win_T;
-        win_T *curwin;
-        typedef long linenr_T;
-        int plines_win(win_T *wp, linenr_T lnum, bool winheight);
-        int plines_win_col(win_T *wp, linenr_T lnum, long column);
-        int plines_win_nofill(win_T *wp, linenr_T lnum, bool winheight);
-    ]])
 
     utils = require('bqf.utils')
-    if utils.isWindows() then
+    if utils.has08() then
         ffi.cdef([[
-            typedef struct {} Error;
-            win_T *find_window_by_handle(int window, Error *err);
+            typedef int32_t linenr_T;
         ]])
     else
         ffi.cdef([[
-            win_T *curwin;
+            typedef long linenr_T;
         ]])
     end
+    ffi.cdef([[
+        typedef struct window_S win_T;
+        typedef struct {} Error;
+        int plines_win(win_T *wp, linenr_T lnum, bool winheight);
+        int plines_win_col(win_T *wp, linenr_T lnum, long column);
+        int plines_win_nofill(win_T *wp, linenr_T lnum, bool winheight);
+        win_T *find_window_by_handle(int window, Error *err);
+    ]])
 end
 
 init()

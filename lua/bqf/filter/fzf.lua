@@ -8,7 +8,7 @@ local uv = vim.loop
 
 local phandler, qhandler, base, config, qfs
 local utils = require('bqf.utils')
-local log = require('bqf.log')
+local log = require('bqf.lib.log')
 
 local actionFor, extraOpts, isWindows
 local ctxActionFor
@@ -51,7 +51,7 @@ local function compareVersion(a, b)
     return 0
 end
 
-local function export4headless(bufnr, signs, fname)
+local function exportForHeadless(bufnr, signs, fname)
     local fnameData = fname .. '_data'
     local fnameSign = fname .. '_sign'
     local fdData = assert(io.open(fnameData, 'w'))
@@ -112,12 +112,12 @@ local function sourceList(qwinid, signs, delim)
             if signs:byte(i) == 0 then
                 signed = signAnsi
             end
-            line = utils.expandtab(line, ts, 3)
+            line = utils.expandTab(line, ts, 3)
         else
             if signs[i] then
                 signed = signAnsi
             end
-            line = utils.expandtab(line, ts)
+            line = utils.expandTab(line, ts)
         end
 
         local lineSect = {}
@@ -133,6 +133,12 @@ local function sourceList(qwinid, signs, delim)
             -- TODO the filter is not good enough
             if lastIsKw and isKw and (byte >= 97 and byte <= 122 or byte >= 65 and byte <= 90) then
                 local _ = nil
+            elseif byte == 0 then
+                -- TODO
+                -- E974: Expected a Number or a String, Blob found
+                -- replace \0 with space
+                line = line:sub(1, j - 1) .. ' ' .. line:sub(j + 1)
+                lastIsKw = false
             elseif byte <= 32 then
                 lastIsKw = false
             else
@@ -153,7 +159,7 @@ local function sourceList(qwinid, signs, delim)
                 end
                 if not concealed then
                     local hlId = fn.synID(i, j, true)
-                    if j > lastCol and lastHlId > 0 and hlId ~= lastHlId then
+                    if j > lastCol and hlId ~= lastHlId then
                         table.insert(lineSect, hlIdToAnsi[lastHlId]:format(line:sub(lastCol, j - 1)))
                         lastCol = j
                     end
@@ -163,7 +169,7 @@ local function sourceList(qwinid, signs, delim)
             j = j + 1
         end
         local hlFmt = lastHlId > 0 and hlIdToAnsi[lastHlId] or '%s'
-        table.insert(lineSect, hlFmt:format(line:sub(lastCol, #line):gsub('%c*$', '')))
+        table.insert(lineSect, hlFmt:format(line:sub(lastCol, #line)))
         local processedLine = lineFmt:format(i, padding, signed, table.concat(lineSect, ''))
         if headless then
             io.write(processedLine)
@@ -180,12 +186,12 @@ local function sourceCmd(qwinid, signs, delim)
     local sfname = fn.fnameescape(tname .. '.lua')
 
     local bufnr = api.nvim_win_get_buf(qwinid)
-    local fnameData, fnameSign = export4headless(bufnr, signs, fname)
+    local fnameData, fnameSign = exportForHeadless(bufnr, signs, fname)
     -- keep spawn process away from inheriting $NVIM_LISTEN_ADDRESS to call server_init()
-    -- look like widnows can't clear env in cmdline
+    -- look like windows can't clear env in cmdline
     local noListenEnv = isWindows and '' or 'NVIM_LISTEN_ADDRESS='
     local cmds = {
-        noListenEnv, vim.v.progpath, '-u NONE --clean -n --headless', '-c', ('so %q'):format(sfname)
+        noListenEnv, vim.v.progpath, '-u NONE -n --headless', '-c', ('so %q'):format(sfname)
     }
     local script = {'pcall(vim.cmd, [['}
 
@@ -193,9 +199,10 @@ local function sourceCmd(qwinid, signs, delim)
 
     table.insert(script, 'set hidden')
     local fenc = vim.bo[bufnr].fenc
+    local title = fn.getwinvar(qwinid, 'quickfix_title', '')
     table.insert(script, ('e %s'):format(fnameSign))
     table.insert(script, ('e ++enc=%s %s'):format(fenc ~= '' and fenc or 'utf8', fnameData))
-    table.insert(script, ('let w:quickfix_title=%q'):format(utils.getwinvar(qwinid, 'quickfix_title', '')))
+    table.insert(script, ('let w:quickfix_title=%q'):format(title))
 
     local bqfRtp
     local qfFiles = vim.list_extend(api.nvim_get_runtime_file('syntax/qf.vim', true),
@@ -305,14 +312,18 @@ local function handler(qwinid, lines)
         api.nvim_win_close(qwinid, true)
     elseif #selectedIndex > 1 then
         local items = qs:list():items()
-        base.filterList(qwinid, coroutine.wrap(function()
-            for _, i in ipairs(selectedIndex) do
-                coroutine.yield(i, items[i])
-            end
-        end))
+        local newItems = {}
+        for _, i in ipairs(selectedIndex) do
+            table.insert(newItems, items[i])
+        end
+        base.filterList(qwinid, newItems)
     elseif #selectedIndex == 1 then
         local idx = selectedIndex[1]
         qhandler.open(true, action, qwinid, idx)
+        if phandler.clicked() then
+            cmd(('keepj norm! %dgg%d|'):format(vim.v.mouse_lnum, vim.v.mouse_col))
+            utils.zz()
+        end
     end
 end
 
@@ -342,7 +353,6 @@ local function watchFile(qwinid, tmpfile)
         local _ = filename
         if events.change then
             uv.fs_read(fd, 4 * 1024, -1, function(err2, data)
-
                 if not phandler.autoEnabled() then
                     return
                 end
@@ -435,11 +445,12 @@ end
 
 function M.preHandle(qwinid, size, bind)
     local lineCount = api.nvim_buf_line_count(0)
+    local height = api.nvim_win_get_height(qwinid) + 1 - (utils.hasWinBar(qwinid) and 1 or 0)
     api.nvim_win_set_config(0, {
         relative = 'win',
         win = qwinid,
         width = api.nvim_win_get_width(qwinid),
-        height = math.min(api.nvim_win_get_height(qwinid) + 1, lineCount + 1),
+        height = math.min(height, lineCount + 1),
         row = 0,
         col = 0
     })
@@ -479,6 +490,15 @@ function M.preHandle(qwinid, size, bind)
         end
     end
 
+    if vim.o.mouse:match('[na]') ~= nil then
+        api.nvim_buf_set_keymap(bufnr, 'n', '<LeftMouse>',
+                                [[<Cmd>lua require('bqf.preview.handler').mouseClick('t')<CR>]],
+                                {nowait = true, noremap = false})
+        api.nvim_buf_set_keymap(bufnr, 'n', '<2-LeftMouse>',
+                                [[<Cmd>lua require('bqf.preview.handler').mouseDoubleClick('t')<CR>]],
+                                {nowait = true, noremap = false})
+    end
+
     if M.postHandle then
         cmd([[
             aug BqfFilterFzf
@@ -499,11 +519,7 @@ function M.run()
     -- greater than 1000 items is worth using headless as stream to improve user experience
     local source = size > 1000 and sourceCmd or sourceList
 
-    local baseOpt = {}
-    if compareVersion(version, '0.25.0') >= 0 then
-        table.insert(baseOpt, '--color')
-        table.insert(baseOpt, 'gutter:-1')
-    end
+    local baseOpt = {'--color', 'gutter:-1'}
     if compareVersion(version, '0.27.4') >= 0 then
         table.insert(baseOpt, '--scroll-off')
         table.insert(baseOpt, utils.scrolloff(qwinid))
@@ -543,9 +559,9 @@ function M.run()
 
     local tmpfile = fn.tempname()
     vim.list_extend(opts.options, {'--preview-window', 0, '--preview', 'echo {1} >> ' .. tmpfile})
-    local releaseCallBack = watchFile(qwinid, tmpfile)
+    local releaseCallback = watchFile(qwinid, tmpfile)
     M.postHandle = function()
-        releaseCallBack()
+        releaseCallback()
         M.postHandle = nil
     end
     phandler.keepPreview()

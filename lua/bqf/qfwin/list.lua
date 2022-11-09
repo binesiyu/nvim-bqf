@@ -25,7 +25,7 @@ local utils = require('bqf.utils')
 ---@field items? BqfQfItem[]
 ---@field nr? number
 ---@field size? number
----@field title? number
+---@field title? string
 ---@field winid? number
 ---@field filewinid? number
 ---@field quickfixtextfunc? string
@@ -138,26 +138,32 @@ function QfList:getQfList(what)
     return self.getqflist(what)
 end
 
+function QfList:itemsCached()
+    local cId = self.itemsCache.id
+    local changedtick = self:changedtick()
+    return changedtick == self._changedtick and cId == self.id
+end
+
 ---
 ---@return number
 function QfList:changedtick()
-    local cd = self.getqflist({id = self.id, changedtick = 0}).changedtick
-    if cd ~= self._changedtick then
+    local changedtick = self.getqflist({id = self.id, changedtick = 0}).changedtick
+    if changedtick ~= self._changedtick then
         self._context = nil
         self._sign = nil
-        QfList.itemsCache = {id = 0, items = {}}
+        self.itemsCache = {id = 0, items = {}}
     end
-    return cd
+    return changedtick
 end
 
 ---
 ---@return table
 function QfList:context()
     local ctx
-    local cd = self:changedtick()
+    local changedtick = self:changedtick()
     if not self._context then
         local qdict = self.getqflist({id = self.id, context = 0})
-        self._changedtick = cd
+        self._changedtick = changedtick
         local c = qdict.context
         self._context = type(c) == 'table' and c or {}
     end
@@ -169,9 +175,9 @@ end
 ---@return QfWinSign
 function QfList:sign()
     local sg
-    local cd = self:changedtick()
+    local changedtick = self:changedtick()
     if not self._sign then
-        self._changedtick = cd
+        self._changedtick = changedtick
         self._sign = require('bqf.qfwin.sign'):new()
     end
     sg = self._sign
@@ -182,16 +188,16 @@ end
 ---@return BqfQfItem[]
 function QfList:items()
     local items
-    local c = QfList.itemsCache
+    local c = self.itemsCache
     local cId, cItems = c.id, c.items
-    local cd = self:changedtick()
-    if cd == self._changedtick and cId == self.id then
+    local changedtick = self:changedtick()
+    if changedtick == self._changedtick and cId == self.id then
         items = cItems
     end
     if not items then
         local qdict = self.getqflist({id = self.id, items = 0})
         items = qdict.items
-        QfList.itemsCache = {id = self.id, items = items}
+        self.itemsCache = {id = self.id, items = items}
     end
     return items
 end
@@ -200,13 +206,14 @@ end
 ---@param idx number
 ---@return BqfQfItem
 function QfList:item(idx)
-    local cd = self:changedtick()
+    local changedtick = self:changedtick()
 
     local e
-    local c = QfList.itemsCache
-    if cd == self._changedtick and c.id == self.id then
+    local c = self.itemsCache
+    if changedtick == self._changedtick and c.id == self.id then
         e = c.items[idx]
     else
+        ---@type BqfQfItem[]
         local items = self.getqflist({id = self.id, idx = idx, items = 0}).items
         if #items == 1 then
             e = items[1]
@@ -246,7 +253,7 @@ end
 ---
 ---@param qwinid? number
 ---@param id? number
----@return BqfQfList
+---@return BqfQfList?
 function QfList:get(qwinid, id)
     local qid, filewinid
     if not id then

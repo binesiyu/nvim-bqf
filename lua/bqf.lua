@@ -1,6 +1,5 @@
 ---@class Bqf
 local M = {}
-local api = vim.api
 local initialized = false
 local autoEnable
 
@@ -45,9 +44,9 @@ end
 function M.toggleAuto()
     autoEnable = autoEnable ~= true
     if autoEnable then
-        api.nvim_echo({{'Enable nvim-bqf automatically', 'WarningMsg'}}, true, {})
+        require('bqf.utils').warn('Enable nvim-bqf automatically')
     else
-        api.nvim_echo({{'Disable nvim-bqf automatically', 'WarningMsg'}}, true, {})
+        require('bqf.utils').warn('Disable nvim-bqf automatically')
     end
 end
 

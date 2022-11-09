@@ -48,13 +48,14 @@ function M.initialize()
             api.nvim_buf_set_keymap(0, tblFunc.mode, keymap, funcrefStr(tblFunc), {nowait = true})
         end
     end
+    api.nvim_buf_set_keymap(0, 'n', '<2-LeftMouse>', '<CR>', {nowait = true, noremap = false})
 end
 
 ---
 ---@param bufnr? number
 function M.dispose(bufnr)
     local function doUnmap(mode, lhs, rhs)
-        if rhs:match([[lua require%('bqf%..*'%)]]) then
+        if type(rhs) == 'string' and rhs:match([[lua require%('bqf%..*'%)]]) then
             api.nvim_buf_del_keymap(bufnr or 0, mode, lhs)
         end
     end
