@@ -11,6 +11,7 @@ local keepPreview, origPos
 local winHeight, winVHeight
 local wrap, borderChars
 local showTitle
+local bufLabel
 local lastIdx
 local PLACEHOLDER_TBL
 
@@ -254,18 +255,19 @@ function M.open(qwinid, qidx, force)
         execPreview(item, lspRangeHl, patternHl)
         utils.zz()
         pvs.scroll(pbufnr, loaded)
-        cmd(('noa call nvim_set_current_win(%d)'):format(pwinid))
     end)
-    if size < 1000 or qlist:itemsCached() then
-        showCountLabel(qlist, qidx)
-    else
-        vim.defer_fn(function()
-            local winid = api.nvim_get_current_win()
-            if qlist.id == qfs:get(winid):list().id and
-                qidx == api.nvim_win_get_cursor(winid)[1] then
-                showCountLabel(qlist, qidx)
-            end
-        end, 50)
+    if bufLabel then
+        if size < 1000 or qlist:itemsCached() then
+            showCountLabel(qlist, qidx)
+        else
+            vim.defer_fn(function()
+                local winid = api.nvim_get_current_win()
+                if qlist.id == qfs:get(winid):list().id and
+                    qidx == api.nvim_win_get_cursor(winid)[1] then
+                    showCountLabel(qlist, qidx)
+                end
+            end, 50)
+        end
     end
 end
 
@@ -275,8 +277,6 @@ end
 function M.scroll(direction, qwinid)
     if pvs.validate() and direction then
         qwinid = qwinid or api.nvim_get_current_win()
-        local qs = qfs:get(qwinid)
-        local pwinid = qs:previousWinid()
         pvs.floatWinExec(function()
             if direction == 0 then
                 api.nvim_win_set_cursor(0, origPos)
@@ -287,7 +287,6 @@ function M.scroll(direction, qwinid)
             utils.zz()
             local ps = previewSession(qwinid)
             pvs.scroll(ps.bufnr)
-            cmd(('noa call nvim_set_current_win(%d)'):format(pwinid))
         end)
     end
 end
@@ -440,6 +439,7 @@ local function init()
     showTitle = pconf.show_title
     winHeight = tonumber(pconf.win_height)
     winVHeight = tonumber(pconf.win_vheight or winHeight)
+    bufLabel = pconf.buf_label
     vim.validate({
         auto_preview = {autoPreview, 'boolean'},
         delay_syntax = {delaySyntax, 'number'},
@@ -452,7 +452,8 @@ local function init()
         },
         show_title = {showTitle, 'boolean'},
         win_height = {winHeight, 'number'},
-        win_vheight = {winVHeight, 'number'}
+        win_vheight = {winVHeight, 'number'},
+        buf_label = {bufLabel, 'boolean'}
     })
 
     cmd([[
@@ -469,7 +470,9 @@ local function init()
     clicked = false
 
     PLACEHOLDER_TBL = {}
-    M.doSyntax = debounce(doSyntax, delaySyntax)
+    -- Damn it! someone wants to disable syntax :(
+    -- https://github.com/kevinhwang91/nvim-bqf/issues/89
+    M.doSyntax = delaySyntax >= 0 and debounce(doSyntax, delaySyntax) or function() end
 end
 
 init()
