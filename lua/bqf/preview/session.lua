@@ -1,8 +1,10 @@
 local api = vim.api
 local cmd = vim.cmd
 
+---@type BqfPreviewTitle
+local title
+local scrollbar = require('bqf.preview.scrollbar')
 local floatwin = require('bqf.preview.floatwin')
-local border = require('bqf.preview.border')
 local extmark = require('bqf.preview.extmark')
 local utils = require('bqf.utils')
 local debounce = require('bqf.lib.debounce')
@@ -13,42 +15,32 @@ local throttle = require('bqf.lib.throttle')
 ---@field private pool table<number, BqfPreviewSession>
 ---@field ns number
 ---@field winid number
----@field winHeight number
----@field winVHeight number
----@field wrap boolean
----@field borderChars string[]
----@field showTitle boolean
 ---@field bufnr number
 ---@field syntax boolean
 ---@field full boolean
 ---@field focusable boolean
 ---@field labelId? number
+---@field enableTitle boolean
+---@field enableScrollBar boolean
 ---@field highlightDebounced BqfDebounce
 ---@field scrollThrottled BqfThrottle
 local PreviewSession = {pool = {}}
+PreviewSession.__index = PreviewSession
 
 ---
 ---@param winid number
----@param o table
+---@param focusable boolean
 ---@return BqfPreviewSession
-function PreviewSession:new(winid, o)
-    o = o or {}
-    local obj = {}
-    setmetatable(obj, self)
-    self.__index = self
-    obj.winid = winid
-    obj.winHeight = o.winHeight
-    obj.winVHeight = o.winVHeight
-    obj.wrap = o.wrap
-    obj.borderChars = o.borderChars
-    obj.showTitle = o.showTitle
-    obj.bufnr = nil
-    obj.syntax = nil
-    obj.full = false
-    obj.focusable = o.focusable or false
+function PreviewSession:new(winid, focusable)
+    local o = self == PreviewSession and setmetatable({}, self) or self
+    o.winid = winid
+    o.bufnr = nil
+    o.syntax = nil
+    o.full = false
+    o.focusable = focusable or false
     self:clean()
-    self.pool[winid] = obj
-    return obj
+    self.pool[winid] = o
+    return o
 end
 
 ---
@@ -70,12 +62,12 @@ end
 function PreviewSession.floatBufReset()
     local fwinid = floatwin.winid
     local fbufnr = floatwin.bufnr
-    local bbufnr = border.bufnr
+    local tbufnr = scrollbar.bufnr
 
     -- 1. make ml_flags empty
     -- 2. treesitter can't clean parser cache until to unload buffer
     -- https://github.com/neovim/neovim/pull/14995
-    cmd(('noa call nvim_win_set_buf(%d, %d)'):format(fwinid, bbufnr))
+    cmd(('noa call nvim_win_set_buf(%d, %d)'):format(fwinid, tbufnr))
     cmd(('noa bun %d'):format(fbufnr))
     cmd(('noa call nvim_win_set_buf(%d, %d)'):format(fwinid, fbufnr))
     extmark.clearHighlight(fbufnr)
@@ -91,39 +83,37 @@ function PreviewSession.floatBufnr()
     return floatwin.bufnr
 end
 
-function PreviewSession.borderBufnr()
-    return border.bufnr
-end
-
 function PreviewSession.floatWinid()
     return floatwin.winid
 end
 
-function PreviewSession.borderWinid()
-    return border.winid
-end
-
 function PreviewSession.close()
     floatwin:close()
-    border:close()
+    if title and PreviewSession.enableTitle then
+        title:close()
+    end
+    scrollbar:close()
 end
 
 function PreviewSession.validate()
-    return floatwin:validate() and border:validate()
-end
-
-function PreviewSession.updateBorder(pbufnr, qidx, size)
-    border:update(pbufnr, qidx, size)
+    local res = floatwin:validate()
+    if res and PreviewSession.enableScrollBar and floatwin.showScrollBar then
+        res = res and scrollbar:validate()
+    end
+    return res
 end
 
 function PreviewSession.scroll(srcBufnr, loaded)
-    border:updateScrollBar()
+    floatwin:refreshTopline()
+    if PreviewSession.enableScrollBar then
+        scrollbar:update()
+    end
     PreviewSession.mapBufHighlight(srcBufnr, loaded)
 end
 
 function PreviewSession:showCountLabel(text, hlGroup)
     local lnum = api.nvim_win_get_cursor(self.floatWinid())[1]
-    self.labelId = extmark.setVirtEol(self.floatBufnr(), lnum - 1, {{text, hlGroup}}, {id = self.labelId})
+    self.labelId = extmark.setVirtText(self.floatBufnr(), self.ns, lnum - 1, -1, {{text, hlGroup}}, {id = self.labelId})
 end
 
 function PreviewSession.mapBufHighlight(srcBufnr, loaded)
@@ -139,20 +129,12 @@ function PreviewSession.mapBufHighlight(srcBufnr, loaded)
     end
 end
 
-function PreviewSession.display()
-    floatwin:display()
-    border:display()
+function PreviewSession:transferBuf(srcBufnr)
+    floatwin:transferBuf(srcBufnr)
 end
 
-function PreviewSession:validOrBuild(owinid)
-    local isValid = self.validate()
-    if not isValid then
-        floatwin:build({
-            qwinid = self.winid,
-            pwinid = owinid,
-            wrap = self.wrap,
-            focusable = self.focusable
-        })
+function PreviewSession:display(pwinid, pbufnr, idx, size, handler)
+    if not self.validate() then
         if self.focusable then
             local ctrlW = false
             vim.on_key(function(char)
@@ -168,7 +150,7 @@ function PreviewSession:validOrBuild(owinid)
                 -- 0x80, 0xfd, 0x4c <ScrollWheelDown>
                 if ctrlW and b1 == 0x77 then
                     vim.schedule(function()
-                        api.nvim_set_current_win(owinid)
+                        api.nvim_set_current_win(pwinid)
                     end)
                 end
                 if b1 == 0x80 and b2 == 0xfd then
@@ -182,30 +164,50 @@ function PreviewSession:validOrBuild(owinid)
             end, self.ns)
         end
     end
-    if not isValid then
-        border:build({chars = self.borderChars, showTitle = self.showTitle})
+    local titleOpts
+    if self.enableTitle then
+        titleOpts = {
+            bufnr = pbufnr,
+            idx = idx,
+            size = size
+        }
     end
-    if self.full then
-        floatwin:setHeight(999, 999)
-    else
-        floatwin:setHeight(self.winHeight, self.winVHeight)
+    local res = floatwin:display(self.winid, pwinid, self.focusable, self.full, handler, titleOpts)
+    if res then
+        if self.enableTitle and self.missingTitle() then
+            local text = floatwin:generateTitle(pbufnr, idx, size)
+            title:display(text)
+        end
+        if self.enableScrollBar then
+            scrollbar:display()
+        end
     end
-    return isValid
 end
 
-local function init()
-    local self = PreviewSession
+function PreviewSession.missingTitle()
+    return title and not floatwin.getConfig().title
+end
+
+function PreviewSession:initialize(o)
     self.ns = api.nvim_create_namespace('bqf-preview')
+    floatwin:initialize(self.ns, o.border, o.wrap, o.winHeight, o.winVHeight, o.winblend)
+    self.enableTitle = o.showTitle
+    self.enableScrollBar = o.showScrollBar
+    if self.enableScrollBar then
+        title = require('bqf.preview.title')
+        title:initialize()
+    end
+    scrollbar:initialize()
+    self.scrollThrottled = self.enableScrollBar and throttle(function()
+        if self.validate() then
+            floatwin:refreshTopline()
+            scrollbar:update()
+        end
+    end, 80) or function()
+    end
     self.highlightDebounced = debounce(function()
         self.mapBufHighlight((self.get() or {}).bufnr)
     end, 50)
-    self.scrollThrottled = throttle(function()
-        if self.validate() then
-            border:updateScrollBar()
-        end
-    end, 80)
 end
-
-init()
 
 return PreviewSession

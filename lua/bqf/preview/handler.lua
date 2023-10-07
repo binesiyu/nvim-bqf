@@ -8,9 +8,6 @@ local autoPreview
 local clicked
 local shouldPreviewCallback
 local keepPreview, origPos
-local winHeight, winVHeight
-local wrap, borderChars
-local showTitle
 local bufLabel
 local lastIdx
 local PLACEHOLDER_TBL
@@ -97,7 +94,7 @@ local function doSyntax(qwinid)
                 vim.o.ei = 'FileType'
                 vim.bo.ft = ft
                 cmd(('do filetypedetect BufRead %s'):format(
-                fn.fnameescape(api.nvim_buf_get_name(ps.bufnr))))
+                    fn.fnameescape(api.nvim_buf_get_name(ps.bufnr))))
                 return vim.bo.ft
             end)
             vim.o.ei = eiBak
@@ -138,6 +135,49 @@ local function showCountLabel(qlist, idx)
     pvs:showCountLabel(('[%d/%d]'):format(cur, cnt), 'BqfPreviewBufLabel')
 end
 
+local function createWinResizeEvent()
+    if fn.exists('##WinResized') == 1 and fn.exists('#BqfPreview#WinResized') == 0 then
+        cmd([[au BqfPreview WinResized * lua require('bqf.preview.handler').qfResized()]])
+    else
+        cmd([[au BqfPreview VimResized <buffer> lua require('bqf.preview.handler').redrawWin()]])
+    end
+end
+
+local function destroyWinResizeEvent()
+    if fn.exists('##WinResized') == 1 then
+        cmd('au! BqfPreview WinResized *')
+    else
+        cmd('au! BqfPreview VimResized *')
+    end
+end
+
+function M.qfResized()
+    local wins = vim.v.event.windows
+    local curWinid = api.nvim_get_current_win()
+    for _, winid in ipairs(wins) do
+        if curWinid == winid then
+            local qs = qfs:get(winid)
+            if qs then
+                M.redrawWin(winid)
+            end
+        end
+    end
+end
+
+function M.redrawWin(qwinid)
+    if not qwinid then
+        local bufnr = tonumber(fn.expand('<abuf>')) or api.nvim_get_current_buf()
+        qwinid = fn.bufwinid(bufnr)
+    end
+    if utils.isWinValid(qwinid) then
+        local preview = pvs.validate()
+        M.close(qwinid)
+        if preview then
+            M.open(qwinid)
+        end
+    end
+end
+
 function M.autoEnabled()
     return autoPreview
 end
@@ -175,6 +215,7 @@ function M.close(qwinid)
     if ps then
         ps.bufnr = nil
     end
+    destroyWinResizeEvent()
 end
 
 ---
@@ -218,23 +259,22 @@ function M.open(qwinid, qidx, force)
         return
     end
 
-    ps:validOrBuild(pwinid)
+    local loaded = utils.isBufLoaded(pbufnr)
+    local size = qlist:getQfList({size = 0}).size
+    local fbufnr
+    ps:display(pwinid, pbufnr, qidx, size, function()
+        fbufnr = pvs.floatBufnr()
+        if force or ps.bufnr ~= pbufnr then
+            pvs.floatBufReset()
+            ts.disableActive(fbufnr)
+            ps:transferBuf(pbufnr)
+            ps.bufnr = pbufnr
+            ps.syntax = ts.tryAttach(pbufnr, fbufnr, loaded)
+        end
+    end)
 
-    pvs.display()
-
-    local fbufnr = pvs.floatBufnr()
     if not fbufnr then
         return
-    end
-
-    local loaded = utils.isBufLoaded(pbufnr)
-    if force or ps.bufnr ~= pbufnr then
-        pvs.floatBufReset()
-        ts.disableActive(fbufnr)
-
-        utils.transferBuf(pbufnr, fbufnr)
-        ps.bufnr = pbufnr
-        ps.syntax = ts.tryAttach(pbufnr, fbufnr, loaded)
     end
 
     if not ps.syntax then
@@ -248,9 +288,6 @@ function M.open(qwinid, qidx, force)
         lspRangeHl = lspRangeHlList[qidx]
     end
 
-    local size = qlist:getQfList({size = 0}).size
-    pvs.updateBorder(pbufnr, qidx, size)
-
     pvs.floatWinExec(function()
         execPreview(item, lspRangeHl, patternHl)
         utils.zz()
@@ -261,14 +298,15 @@ function M.open(qwinid, qidx, force)
             showCountLabel(qlist, qidx)
         else
             vim.defer_fn(function()
-                local winid = api.nvim_get_current_win()
-                if qlist.id == qfs:get(winid):list().id and
-                    qidx == api.nvim_win_get_cursor(winid)[1] then
+                if utils.isWinValid(qwinid) and qlist.id == qfs:get(qwinid):list().id and
+                    qidx == api.nvim_win_get_cursor(qwinid)[1] then
                     showCountLabel(qlist, qidx)
                 end
             end, 50)
         end
     end
+
+    createWinResizeEvent()
 end
 
 ---
@@ -309,7 +347,31 @@ function M.toggle(qwinid)
     end
 end
 
-function M.toggleItem(qwinid)
+---
+---@param qwinid? number
+---@return boolean
+function M.showWindow(qwinid)
+    local res = false
+    if not pvs.validate() then
+        M.open(qwinid, nil, true)
+        res = true
+    end
+    return res
+end
+
+---
+---@param qwinid? number
+---@return boolean
+function M.hideWindow(qwinid)
+    local res = false
+    if pvs.validate() then
+        M.close(qwinid)
+        res = true
+    end
+    return res
+end
+
+function M.toggleWindow(qwinid)
     if pvs.validate() then
         M.close(qwinid)
     else
@@ -330,15 +392,6 @@ function M.moveCursor()
         if api.nvim_win_get_cursor(qwinid)[1] ~= lastIdx then
             M.close(qwinid)
         end
-    end
-end
-
-function M.redrawWin()
-    if pvs.validate() then
-        local bufnr = tonumber(fn.expand('<abuf>')) or api.nvim_get_current_buf()
-        local qwinid = fn.bufwinid(bufnr)
-        M.close(qwinid)
-        M.open(qwinid)
     end
 end
 
@@ -377,8 +430,17 @@ function M.mouseDoubleClick(mode)
             cmd('startinsert')
             api.nvim_feedkeys(('%c'):format(0x0d), 'it', false)
         else
+            local lnum, vcol = vim.v.mouse_lnum, vim.v.mouse_col
+            local col
+            if utils.has08() then
+                col = math.max(0, fn.virtcol2col(clickedWinid, lnum, vcol) - 1)
+            end
             cmd(('norm %c'):format(0x0d))
-            cmd(('keepj norm! %dgg%d|'):format(vim.v.mouse_lnum, vim.v.mouse_col))
+            if col then
+                api.nvim_win_set_cursor(0, {lnum, col})
+            else
+                cmd(('keepj norm! %dgg%d|'):format(lnum, vcol))
+            end
             utils.zz()
         end
     end
@@ -388,7 +450,6 @@ function M.initialize(qwinid)
     cmd([[
         aug BqfPreview
             au! * <buffer>
-            au VimResized <buffer> lua require('bqf.preview.handler').redrawWin()
             au CursorMoved,WinEnter <buffer> lua require('bqf.preview.handler').moveCursor()
             au WinLeave,BufWipeout,BufHidden <buffer> lua require('bqf.preview.handler').close()
         aug END
@@ -396,14 +457,7 @@ function M.initialize(qwinid)
 
     local mouseEnabled = vim.o.mouse:match('[na]') ~= nil
 
-    pvs:new(qwinid, {
-        winHeight = winHeight,
-        winVHeight = winVHeight,
-        wrap = wrap,
-        borderChars = borderChars,
-        showTitle = showTitle,
-        focusable = mouseEnabled
-    })
+    pvs:new(qwinid, mouseEnabled)
     -- some plugins will change the quickfix window, preview window should init later
     vim.defer_fn(function()
         lastIdx = -1
@@ -415,11 +469,11 @@ function M.initialize(qwinid)
         if mouseEnabled then
             local qbufnr = api.nvim_win_get_buf(qwinid)
             api.nvim_buf_set_keymap(qbufnr, '', '<LeftMouse>',
-                                    [[<Cmd>lua require('bqf.preview.handler').mouseClick()<CR>]],
-                                    {nowait = true, noremap = false})
+                [[<Cmd>lua require('bqf.preview.handler').mouseClick()<CR>]],
+                {nowait = true, noremap = false})
             api.nvim_buf_set_keymap(qbufnr, 'n', '<2-LeftMouse>',
-                                    [[<Cmd>lua require('bqf.preview.handler').mouseDoubleClick()<CR>]],
-                                    {nowait = true, noremap = false})
+                [[<Cmd>lua require('bqf.preview.handler').mouseDoubleClick()<CR>]],
+                {nowait = true, noremap = false})
         end
 
         if autoPreview and api.nvim_get_current_win() == qwinid then
@@ -433,33 +487,41 @@ local function init()
     vim.validate({preview = {pconf, 'table'}})
     local delaySyntax = tonumber(pconf.delay_syntax)
     autoPreview = pconf.auto_preview
-    wrap = pconf.wrap
     shouldPreviewCallback = pconf.should_preview_cb
-    borderChars = pconf.border_chars
-    showTitle = pconf.show_title
-    winHeight = tonumber(pconf.win_height)
-    winVHeight = tonumber(pconf.win_vheight or winHeight)
+    local wrap, winblend = pconf.wrap, pconf.winblend
+    local showTitle, showScrollBar = pconf.show_title, pconf.show_scroll_bar
+    local winHeight = tonumber(pconf.win_height)
+    local winVHeight = tonumber(pconf.win_vheight or winHeight)
     bufLabel = pconf.buf_label
     vim.validate({
         auto_preview = {autoPreview, 'boolean'},
         delay_syntax = {delaySyntax, 'number'},
-        wrap = {wrap, 'boolean'},
         should_preview_cb = {shouldPreviewCallback, 'function', true},
-        border_chars = {
-            borderChars, function(chars)
-                return type(chars) == 'table' and #chars == 9
-            end, 'a table with 9 chars'
-        },
+        wrap = {wrap, 'boolean'},
         show_title = {showTitle, 'boolean'},
+        show_scroll_bar = {showScrollBar, 'boolean'},
         win_height = {winHeight, 'number'},
         win_vheight = {winVHeight, 'number'},
+        winblend = {winblend, 'number'},
         buf_label = {bufLabel, 'boolean'}
     })
-
+    pvs:initialize({
+        border = pconf.border,
+        wrap = wrap,
+        showTitle = showTitle,
+        showScrollBar = showScrollBar,
+        winHeight = winHeight,
+        winVHeight = winVHeight,
+        winblend = winblend
+    })
     cmd([[
         hi default link BqfPreviewFloat Normal
-        hi default link BqfPreviewBorder Normal
+        hi default link BqfPreviewBorder FloatBorder
+        hi default link BqfPreviewTitle Title
+        hi default link BqfPreviewThumb PmenuThumb
+        hi default link BqfPreviewSbar PmenuSbar
         hi default link BqfPreviewCursor Cursor
+        hi default link BqfPreviewCursorLine CursorLine
         hi default link BqfPreviewRange IncSearch
         hi default link BqfPreviewBufLabel BqfPreviewRange
 
@@ -472,7 +534,9 @@ local function init()
     PLACEHOLDER_TBL = {}
     -- Damn it! someone wants to disable syntax :(
     -- https://github.com/kevinhwang91/nvim-bqf/issues/89
-    M.doSyntax = delaySyntax >= 0 and debounce(doSyntax, delaySyntax) or function() end
+    ---@diagnostic disable-next-line: unused-local
+    M.doSyntax = delaySyntax >= 0 and debounce(doSyntax, delaySyntax) or function(qwinid)
+    end
 end
 
 init()

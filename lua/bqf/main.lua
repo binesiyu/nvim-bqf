@@ -11,7 +11,7 @@ local magicwin = require('bqf.magicwin.handler')
 local keymap = require('bqf.keymap')
 
 function M.toggle()
-    if vim.b.bqf_enabled then
+    if vim.w.bqf_enabled then
         M.disable()
     else
         M.enable()
@@ -21,14 +21,14 @@ end
 function M.enable()
     -- need after vim-patch:8.1.0877
     if not layout.validQfWin() then
-        return
+        return false
     end
 
     local qwinid = api.nvim_get_current_win()
     local qs = qfs:new(qwinid)
     assert(qs, 'It is not a quickfix window')
     local qlist = qs:list()
-    if qlist:changedtick() == 0 then
+    if qlist:changedtick() == 0 and vim.w.bqf_enabled then
         return
     end
     vim.wo.nu, vim.wo.rnu = true, false
@@ -53,14 +53,15 @@ function M.enable()
     -- After WinClosed callback in magic window, WinClosed in main can't be fired.
     -- WinClosed event in magic window must after in main
     magicwin.attach(qwinid, pwinid, nil, adjustHeightCallback)
-    vim.b.bqf_enabled = true
+    vim.w.bqf_enabled = true
+    return true
 end
 
 function M.disable()
-    if vim.bo.buftype ~= 'quickfix' or not vim.b.bqf_enabled then
-        return
+    if vim.bo.buftype ~= 'quickfix' then
+        return false
     end
-    vim.b.bqf_enabled = false
+    vim.w.bqf_enabled = false
     local qwinid = api.nvim_get_current_win()
     preview.close(qwinid)
     keymap.dispose()
@@ -69,12 +70,14 @@ function M.disable()
     cmd('sil! au! BqfFilterFzf * <buffer>')
     cmd('sil! au! BqfMagicWin')
     qfs:dispose()
+    return true
 end
 
 local function close(winid)
     local ok, msg = pcall(api.nvim_win_close, winid, false)
     if not ok then
         -- Vim:E444: Cannot close last window
+        ---@diagnostic disable-next-line: need-check-nil
         if msg:match('^Vim:E444') then
             local function closeLastWin()
                 cmd('new')

@@ -1,5 +1,68 @@
 # Changelog
 
+## [1.1.0] - 2023-02-20
+
+### Features
+
+#### Preview
+
+- Add `BqfPreviewCursorLine` to make CursorLine configurable (#97)
+- Add `hidePreviewWindow` and `showPreviewWindow` API (#100)
+
+### Bug Fixes
+
+#### Preview
+
+- Convert vcol to byte col
+
+#### FZF
+
+- Correct to expand tab for line in headless mode
+
+#### Miscellaneous
+
+- Disable bqf correctly
+- `nvim -q` make changedtick of qf euqal to 0 (#104)
+
+## [1.0.0] - 2023-01-05
+
+### Features
+
+#### Preview
+
+- Add show_title option (#75)
+- Add buf_label to the buffer under cursor and option
+- Disable syntax if delay_syntax < 0 (#89)
+
+### Bug Fixes
+
+#### Preview
+
+- Fix invalid window id error on updateScrollBar (#80)
+
+#### FZF
+
+- Fix E974: Expected a Number or a String, Blob found
+- Set `--no-separator` after 0.35.0
+
+#### Qfwin
+
+- Toggle sign should support v:count
+
+#### MagicWin
+
+- Validate winView before reset
+
+#### Miscellaneous
+
+- Restore last window if exec cmd in other window (#91)
+- Rhs maybe missing after nvim 0.8 (#77)
+- Use w:bqf_enabled instead of b:bqf_enabled
+- Be compatible with splitkeep
+- Be compatible with winbar (#81)
+- Be compatible with cmdheight=0
+- [**breaking**] Bump Neovim to 0.6.1
+
 ## [0.9.9] - 2022-08-25
 
 ### Bug Fixes

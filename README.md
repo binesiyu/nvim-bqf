@@ -35,6 +35,7 @@ So why not nvim-bqf?
   - [Function table](#function-table)
   - [Buffer Commands](#buffer-commands)
   - [Commands](#commands)
+  - [API](#api)
   - [Quickfix context](#quickfix-context)
     - [Why use an additional context?](#why-use-an-additional-context)
     - [Supported keys](#supported-keys)
@@ -182,13 +183,17 @@ Using external grep-like program to search `display` and replace it to `show`, b
             description = [[Enable preview in quickfix window automatically]],
             default = true
         },
-        border_chars = {
-            description = [[Border and scroll bar chars, they respectively represent:
-                vline, vline, hline, hline, ulcorner, urcorner, blcorner, brcorner, sbar]],
-            default = {'│', '│', '─', '─', '╭', '╮', '╰', '╯', '█'}
+        border = {
+            description = [[The border for preview window,
+                `:h nvim_open_win() | call search('border:')`]],
+            default = 'rounded',
         },
         show_title = {
             description = [[Show the window title]],
+            default = true
+        },
+        show_scroll_bar = {
+            description = [[Show the scroll bar]],
             default = true
         },
         delay_syntax = {
@@ -204,6 +209,10 @@ Using external grep-like program to search `display` and replace it to `show`, b
             description = [[The height of preview window for vertical layout]],
             default = 15
         },
+        winblend = {
+            description = [[The winblend for preview window, `:h winblend`]],
+            default = 12
+        }
         wrap = {
             description = [[Wrap the line, `:h wrap` for detail]],
             default = false
@@ -267,20 +276,20 @@ about current configuration.
 
 | Function    | Action                                                     | Def Key   |
 | ----------- | ---------------------------------------------------------- | --------- |
-| open        | open the item under the cursor in quickfix window          | `<CR>`    |
+| open        | open the item under the cursor                             | `<CR>`    |
 | openc       | open the item, and close quickfix window                   | `o`       |
 | drop        | use `drop` to open the item, and close quickfix window     | `O`       |
 | tabdrop     | use `tab drop` to open the item, and close quickfix window |           |
 | tab         | open the item in a new tab                                 | `t`       |
-| tabb        | open the item in a new tab, but stay at quickfix window    | `T`       |
+| tabb        | open the item in a new tab, but stay in quickfix window    | `T`       |
 | tabc        | open the item in a new tab, and close quickfix window      | `<C-t>`   |
-| split       | open the item in vertical split                            | `<C-x>`   |
-| vsplit      | open the item in horizontal split                          | `<C-v>`   |
+| split       | open the item in horizontal split                          | `<C-x>`   |
+| vsplit      | open the item in vertical split                            | `<C-v>`   |
 | prevfile    | go to previous file under the cursor in quickfix window    | `<C-p>`   |
 | nextfile    | go to next file under the cursor in quickfix window        | `<C-n>`   |
-| prevhist    | go to previous quickfix list in quickfix window            | `<`       |
-| nexthist    | go to next quickfix list in quickfix window                | `>`       |
-| lastleave   | go to last leaving position in quickfix window             | `'"`      |
+| prevhist    | cycle to previous quickfix list in quickfix window         | `<`       |
+| nexthist    | cycle to next quickfix list in quickfix window             | `>`       |
+| lastleave   | go to last selected item in quickfix window                | `'"`      |
 | stoggleup   | toggle sign and move cursor up                             | `<S-Tab>` |
 | stoggledown | toggle sign and move cursor down                           | `<Tab>`   |
 | stogglevm   | toggle multiple signs in visual mode                       | `<Tab>`   |
@@ -290,8 +299,8 @@ about current configuration.
 | pscrolldown | scroll down half-page in preview window                    | `<C-f>`   |
 | pscrollorig | scroll back to original position in preview window         | `zo`      |
 | ptogglemode | toggle preview window between normal and max size          | `zp`      |
-| ptoggleitem | toggle preview for an item of quickfix list                | `p`       |
-| ptoggleauto | toggle auto preview when cursor moved                      | `P`       |
+| ptoggleitem | toggle preview for a quickfix list item                    | `p`       |
+| ptoggleauto | toggle auto-preview when cursor moves                      | `P`       |
 | filter      | create new list for signed items                           | `zn`      |
 | filterr     | create new list for non-signed items                       | `zN`      |
 | fzffilter   | enter fzf mode                                             | `zf`      |
@@ -312,6 +321,10 @@ Additional mouse supported:
 ### Commands
 
 - `BqfAutoToggle`: Toggle nvim-bqf enable automatically
+
+### API
+
+[bqf.lua](./lua/bqf.lua)
 
 ### Quickfix context
 
@@ -413,20 +426,28 @@ nvim-bqf actually works with context in
 
 ```vim
 hi default link BqfPreviewFloat Normal
-hi default link BqfPreviewBorder Normal
+hi default link BqfPreviewBorder FloatBorder
+hi default link BqfPreviewTitle Title
+hi default link BqfPreviewThumb PmenuThumb
+hi default link BqfPreviewSbar PmenuSbar
 hi default link BqfPreviewCursor Cursor
+hi default link BqfPreviewCursorLine CursorLine
 hi default link BqfPreviewRange IncSearch
-hi default link BqfPreviewCountLabel BqfPreviewRange
+hi default link BqfPreviewBufLabel BqfPreviewRange
 hi default BqfSign ctermfg=14 guifg=Cyan
 ```
 
-- `BqfPreviewFloat`: highlight floating window
-- `BqfPreviewBorder`: highlight border of floating window
-- `BqfPreviewCursor`: highlight the cursor format `[lnum, col]` in preview window
-- `BqfPreviewRange`: highlight the range format `[lnum, col, range]`, which is produced by
-  `pattern_hl`, `lsp_ranges_hl` and quickfix range
-- `BqfPreviewBufLabel`: highlight the index and count of the buffer under the cursor
-- `BqfSign`: highlight the sign in quickfix window
+- `BqfPreviewFloat`: Floating window.
+- `BqfPreviewBorder`: Border of floating window.
+- `BqfPreviewTitle`: Title of preview window.
+- `BqfPreviewThumb`: Thumb of preview window.
+- `BqfPreviewSbar`: Scroll bar of preview window, only take effect if the border is missing right.
+- `BqfPreviewCursor`: The cursor format `[lnum, col]` in preview window.
+- `BqfPreviewCursorLine`: The text line of the cursor in preview window.
+- `BqfPreviewRange`: The range format `[lnum, col, range]`, which is produced by
+  `pattern_hl`, `lsp_ranges_hl` and quickfix range.
+- `BqfPreviewBufLabel`: The index and count of the buffer under the cursor
+- `BqfSign`: The sign in quickfix window.
 
 ## Advanced configuration
 
@@ -434,7 +455,9 @@ hi default BqfSign ctermfg=14 guifg=Cyan
 
 ```lua
 vim.cmd([[
-    hi BqfPreviewBorder guifg=#50a14f ctermfg=71
+    hi BqfPreviewBorder guifg=#3e8e2d ctermfg=71
+    hi BqfPreviewTitle guifg=#3e8e2d ctermfg=71
+    hi BqfPreviewThumb guibg=#3e8e2d ctermbg=71
     hi link BqfPreviewRange Search
 ]])
 
@@ -445,7 +468,7 @@ require('bqf').setup({
         win_height = 12,
         win_vheight = 12,
         delay_syntax = 80,
-        border_chars = {'┃', '┃', '━', '━', '┏', '┓', '┗', '┛', '█'},
+        border = {'┏', '━', '┓', '┃', '┛', '━', '┗', '┃'},
         show_title = false,
         should_preview_cb = function(bufnr, qwinid)
             local ret = true
